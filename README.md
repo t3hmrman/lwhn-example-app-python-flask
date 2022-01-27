@@ -35,13 +35,26 @@ $ pip install --editable .
 $ # Set the environment variables for your app
 $ export LWHN_APP_CLIENT_ID=< value from loginwithhn.com >
 $ export LWHN_APP_CLIENT_SECRET=< value from loginwithhn.com >
-$ export APP_HOSTNAME=where-you-hosted-it.com # ex: http://localhost:5000
+$ export APP_HOSTNAME=where-you-hosted-it.com # ex: http://localhost:5000 ('/callback' will be added by the app)
 
 $ # Run the app (the virtual env should be loaded)
-$ export FLASK_APP=src/simple_login/app.py
-$ flask run
+$ flask run -h localhost
 ```
 
 After the app is running, view it in your browser at `http://localhost:5000`
+
+# FAQ
+
+## ERROR: CSRF Value from teh token does not match
+
+If you get a redirect like this:
+
+```
+127.0.0.1 - - [28/Jan/2022 01:14:13] "GET /callback?error=request_forbidden&error_description=The+request+is+not+allowed.+The+CSRF+value+from+the+token+does+not+match+the+CSRF+value+from+the+data+store.&state=00e2bb58970e339e760ebb1d4958f97cd7c34f52628609f978eec79b7336832c HTTP/1.1" 401 -
+```
+
+Make sure that the URL you used for your app *matches the server exactly*. For example, if you ask for a callback URL of `http://localhost:5000` but your server is running as `http://127.0.0.1:5000`, **you must use the same URL in both places**. `localhost` and `127.0.0.1` may resolve to the same place, but they're not the same URL in terms of cookies.
+
+See [comment in ory/hydra issue #1647](https://github.com/ory/hydra/issues/1647#issuecomment-558169277)
 
 [lwhn]: https://loginwithhn.com

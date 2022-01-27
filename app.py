@@ -115,7 +115,7 @@ def login() -> Response:
     payload = {
         'client_id':     current_app.config["LWHN_APP_CLIENT_ID"],
         'response_type': 'code',
-        'scope':         'openid email',
+        'scope':         'openid',
         'redirect_uri':  current_app.config["APP_HOSTNAME"]+'/callback',
         'state':         state,
         'nonce':         nonce,
@@ -144,15 +144,20 @@ def callback() -> Response:
     code = request.args.get('code', '')
     payload = {
         'code':          code,
-        'client_id':     current_app.config["LWHN_APP_CLIENT_ID"],
-        'client_secret': current_app.config["LWHN_APP_CLIENT_SECRET"],
         'redirect_uri':  current_app.config["APP_HOSTNAME"]+'/callback',
         'grant_type':    'authorization_code',
+        'scope':    'openid',
     }
 
-    r = requests.post(LWHN_OAUTH2_TOKEN_ENDPOINT, payload)
+    # Client ID & Secret must be passed through via Basic Auth for LWHN Applications
+    auth = {
+        'client_id':     current_app.config["LWHN_APP_CLIENT_ID"],
+        'client_secret': current_app.config["LWHN_APP_CLIENT_SECRET"],
+    }
+
+    r = requests.post(LWHN_OAUTH2_TOKEN_ENDPOINT, payload, auth=auth)
     if r.status_code != requests.codes.ok:
-        response = make_response(json.dumps('Got error from LWHN.'), 401)
+        response = make_response(json.dumps('Got error from LWHN, See error log'), 401)
         response.headers['Content-Type'] = 'application/json'
         return response
 
@@ -205,3 +210,9 @@ def logout() -> Response:
     """
     logout_user()
     return redirect("/")
+
+
+if __name__ == '__main__':
+    app_host = os.environ.get("APP_LOCAL_HOSTNAME", default="localhost")
+    app_port = os.environ.get("APP_LOCAL_PORT", default="5000")
+    app.run(host=app_host, port=app_port)
