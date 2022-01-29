@@ -150,10 +150,7 @@ def callback() -> Response:
     }
 
     # Client ID & Secret must be passed through via Basic Auth for LWHN Applications
-    auth = {
-        'client_id':     current_app.config["LWHN_APP_CLIENT_ID"],
-        'client_secret': current_app.config["LWHN_APP_CLIENT_SECRET"],
-    }
+    auth = (current_app.config["LWHN_APP_CLIENT_ID"], current_app.config["LWHN_APP_CLIENT_SECRET"])
 
     r = requests.post(LWHN_OAUTH2_TOKEN_ENDPOINT, payload, auth=auth)
     if r.status_code != requests.codes.ok:

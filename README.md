@@ -55,6 +55,16 @@ If you get a redirect like this:
 
 Make sure that the URL you used for your app *matches the server exactly*. For example, if you ask for a callback URL of `http://localhost:5000` but your server is running as `http://127.0.0.1:5000`, **you must use the same URL in both places**. `localhost` and `127.0.0.1` may resolve to the same place, but they're not the same URL in terms of cookies.
 
+It may help to manually clear cookies on `localhost` (specifically `oauth2_authentication_csrf_insecure`)
+
+See: [Hydra Common CSRF mistakes](https://www.ory.sh/hydra/docs/debug/csrf/#mixing-up-127001-and-localhost)
+See: [comment in ory/hydra issue #1647](https://github.com/ory/hydra/issues/1647#issuecomment-558169277)
+
+## ERROR: No CSRF value available in the session cookie
+
+Ensure you are not in a private window -- you can't run the LWHN OAuth2 flow in a private window.
+
+See: [Hydra Common CSRF mistakes](https://www.ory.sh/hydra/docs/debug/csrf/#mixing-up-127001-and-localhost)
 See [comment in ory/hydra issue #1647](https://github.com/ory/hydra/issues/1647#issuecomment-558169277)
 
 [lwhn]: https://loginwithhn.com
