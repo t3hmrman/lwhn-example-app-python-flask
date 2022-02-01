@@ -11,7 +11,7 @@ import logging
 from flask import Flask, session, current_app, render_template, redirect
 from flask import make_response, request, Response
 from flask_session import Session
-from flask_login import LoginManager, login_required, login_user
+from flask_login import LoginManager, login_required, login_user, logout_user, current_user
 from urllib.parse import urlencode
 
 from typing import Dict, Optional
@@ -30,6 +30,7 @@ from typing import Dict, Optional
 
 LWHN_OAUTH2_TOKEN_ENDPOINT = 'https://hydra.loginwithhn.com/oauth2/token'
 LWHN_OAUTH2_AUTH_URL = 'https://hydra.loginwithhn.com/oauth2/auth'
+LWHN_OAUTH2_LOGOUT_URL = 'https://hydra.loginwithhn.com/oauth2/sessions/logout'
 
 LWHN_APP_CLIENT_ID = os.environ.get("LWHN_APP_CLIENT_ID", default="")
 LWHN_APP_CLIENT_SECRET = os.environ.get("LWHN_APP_CLIENT_SECRET", default="")
@@ -65,6 +66,7 @@ class User(object):
     id = attr.ib()
     hn_username: str = attr.ib()
     karma: int = attr.ib()
+    id_token: str = attr.ib()
 
     is_authenticated = True
     is_active = True
@@ -207,7 +209,7 @@ def callback() -> Response:
     karma = jwt_payload['metadata']['karma']
 
     # Create the user, save to in-memory user store
-    u = User(user_id, hn_username=hn_username, karma=karma)
+    u = User(user_id, hn_username=hn_username, karma=karma, id_token=id_token)
     app.logger.debug("Created user: {}".format(u))
 
     # Save the user to the in-memory user store (emptied out if the application is stopped)
@@ -216,14 +218,8 @@ def callback() -> Response:
     # Log the user in with Flask-Login (setting cookies, etc)
     login_user(u)
 
-    response = make_response(json.dumps({
-        "status": "success",
-        "message": "Successfully logged in! Manually visit /secret in your browser (normally you should redirect the user instead of showing this JSON!)",
-        "hn_username": u.hn_username,
-        "user_id": user_id,
-    }))
-    response.headers['Content-Type'] = 'application/json'
-    return response
+    # Redirect to the secret part of the app if an error hasn't occurred
+    return redirect(current_app.config["APP_HOSTNAME"] + '/secret');
 
 @app.route("/secret", methods=['GET'])
 @login_required
@@ -231,6 +227,7 @@ def secret() -> Response:
     """
     This is the endpoint that only logged in users can see
     """
+    # current_user will be filled in by Flask-Login in the template
     return render_template('secret.html')
 
 @app.route("/logout", methods=['GET'])
@@ -241,12 +238,34 @@ def logout() -> Response:
 
     see: https://flask-login.readthedocs.io/en/latest/
     """
+
+    # # If you wanted, you could logout the user right here and call it a day
+    # logout_user()
+
+    # [OPTIONAL] redirect to loginwithhn.com for logout, with a post_logout_redirect_uri
+    state = hashlib.sha256(os.urandom(1024)).hexdigest()
+    payload = {
+        'id_token_hint':            current_user.id_token,
+        'state':                    state,
+        # After LWHN has logged out the user, it should redirect us back to our app
+        # the post_logout_redirect_uri MUST be registered with LoginWithHN!
+        # (if you don't specify a post logout redirect, users will be redirected to https://loginwithhn.com)
+        'post_logout_redirect_uri': current_app.config["APP_HOSTNAME"] + '/logout/finish',
+    }
+
+    # Redirect to LoginWithHN to kick off the login process
+    redirect_url = LWHN_OAUTH2_LOGOUT_URL + '?' + urlencode(payload)
+    app.logger.debug("[logout] starting logout by redirecting to url [%s]", redirect_url)
+
+    return redirect(redirect_url)
+
+@app.route("/logout/finish", methods=['GET'])
+def logout_finish() -> Response:
+    """
+    Finish logout (redirected to by your OAuth provider, in this case LoginWithHN)
+    """
     logout_user()
-
-    # [TODO] [OPTIONAL] redirect to loginwithhn.com for logout, with a post_logout_redirect_uri
-
     return redirect("/")
-
 
 if __name__ == '__main__':
     app_host = os.environ.get("APP_LOCAL_HOSTNAME", default="localhost")
