@@ -43,7 +43,13 @@ $ flask run -h localhost
 
 After the app is running, view it in your browser at `http://localhost:5000`
 
+**NOTE** If you used `127.0.0.1` for your Client callback URL, make sure to use it here too! They are distinct URLs and must be treated as such.
+
 # FAQ
+
+## Can I turn on Flask Debug? (`FLASK_DEBUG=1`)
+
+Yes, but be careful, as it will wipe out the `USER_STORE` which is only in memory!
 
 ## ERROR: CSRF Value from teh token does not match
 

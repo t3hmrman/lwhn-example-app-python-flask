@@ -6,11 +6,13 @@ import random
 import hashlib
 import requests
 import time
+import logging
 
 from flask import Flask, session, current_app, render_template, redirect
 from flask import make_response, request, Response
 from flask_session import Session
 from flask_login import LoginManager, login_required, login_user
+from urllib.parse import urlencode
 
 from typing import Dict, Optional
 
@@ -38,7 +40,10 @@ APP_COOKIE_SECRET_KEY = os.environ.get("APP_COOKIE_SECRET_KEY", default="super-s
 SESSION_TYPE = 'filesystem'
 
 # Build the flask app
-app = Flask(__name__)
+app = Flask(__name__,
+            static_url_path='',
+            static_folder='static')
+app.logger.setLevel(logging.DEBUG)
 
 # Application configuration
 app.config.from_object(__name__)
@@ -58,13 +63,15 @@ login_manager.init_app(app)
 @attr.s
 class User(object):
     id = attr.ib()
+    hn_username: str = attr.ib()
+    karma: int = attr.ib()
+
     is_authenticated = True
     is_active = True
     is_anonymous = False
 
     def get_id(self):
         return self.id
-
 
 USER_STORE: Dict[str, User] = {}
 
@@ -120,12 +127,14 @@ def login() -> Response:
         'state':         state,
         'nonce':         nonce,
     }
-    r = requests.get(LWHN_OAUTH2_AUTH_URL + '?', payload)
 
-    # Print out the session ID being managed by Flask Session
-    app.logger.debug('session id is %s', session.sid)
+    # Redirect to LoginWithHN to kick off the login process
+    redirect_url = LWHN_OAUTH2_AUTH_URL + '?' + urlencode(payload)
 
-    return redirect(r.url)
+    app.logger.debug("session id is [%s]", session.sid)
+    app.logger.debug("redirecting to url [%s]", redirect_url)
+
+    return redirect(redirect_url)
 
 @app.route("/callback", methods=['GET'])
 def callback() -> Response:
@@ -143,49 +152,76 @@ def callback() -> Response:
     # 4. Exchange code for access token and ID token
     code = request.args.get('code', '')
     payload = {
+        'client_id':     current_app.config["LWHN_APP_CLIENT_ID"],
         'code':          code,
         'redirect_uri':  current_app.config["APP_HOSTNAME"]+'/callback',
         'grant_type':    'authorization_code',
-        'scope':    'openid',
+        'scope':         'openid',
     }
 
     # Client ID & Secret must be passed through via Basic Auth for LWHN Applications
     auth = (current_app.config["LWHN_APP_CLIENT_ID"], current_app.config["LWHN_APP_CLIENT_SECRET"])
 
+    # Exchange code for an OAuth2 Token
     r = requests.post(LWHN_OAUTH2_TOKEN_ENDPOINT, payload, auth=auth)
     if r.status_code != requests.codes.ok:
         response = make_response(json.dumps('Got error from LWHN, See error log'), 401)
         response.headers['Content-Type'] = 'application/json'
         return response
 
-    id_token = r.json()['id_token']
-
     # 5. Obtain user information from the ID token
+    resp_json = r.json()
+    app.logger.debug("Received JSON from token endpoint : [%s]", json.dumps(resp_json, indent=2))
 
-    # TODO: Save the user's id token for later logout
+    # The ID token will come in as a very long JWT that we want to save (will be used at log out)
+    id_token = resp_json['id_token']
     jwt = id_token.split('.')
     jwt_payload = json.loads(base64.b64decode(jwt[1] + "==="))
+    app.logger.debug("Received jwt_payload: [%s]", json.dumps(jwt_payload, indent=2))
 
+    # Ensure a nonce was provided
     if jwt_payload['nonce'] != session.pop('nonce', ''):
         response = make_response(json.dumps('Invalid nonce.'), 401)
         response.headers['Content-Type'] = 'application/json'
         return response
 
-    if jwt_payload['iss'] != 'https://accounts.google.com':
-        response = make_response(json.dumps('Invalid issuer.'), 401)
+    # Ensure the audience is right (it should be your client app ID)
+    if not current_app.config["LWHN_APP_CLIENT_ID"] in jwt_payload['aud']:
+        response = make_response(json.dumps("Audience is missing app client ID."), 401)
         response.headers['Content-Type'] = 'application/json'
         return response
 
-    user_id = 'google-' + jwt_payload['sub']
+    # Ensure the issuer is what we expect
+    if jwt_payload['iss'] != 'https://loginwithhn.com/':
+        response = make_response(json.dumps("Invalid issuer [{}].".format(jwt_payload['iss'])), 401)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+    # Save the user ID as the returned 'sub' claim (the HN username)
+    user_id = jwt_payload['sub']
+
+    # HN username
+    hn_username = jwt_payload['username']
+
+    # You can even grab the latest known karma count of the user
+    karma = jwt_payload['metadata']['karma']
 
     # Create the user, save to in-memory user store
-    u = User(user_id)
+    u = User(user_id, hn_username=hn_username, karma=karma)
+    app.logger.debug("Created user: {}".format(u))
+
+    # Save the user to the in-memory user store (emptied out if the application is stopped)
     USER_STORE[user_id] = u
 
-    # Log the user in
+    # Log the user in with Flask-Login (setting cookies, etc)
     login_user(u)
 
-    response = make_response(json.dumps(user_id))
+    response = make_response(json.dumps({
+        "status": "success",
+        "message": "Successfully logged in! Manually visit /secret in your browser (normally you should redirect the user instead of showing this JSON!)",
+        "hn_username": u.hn_username,
+        "user_id": user_id,
+    }))
     response.headers['Content-Type'] = 'application/json'
     return response
 
@@ -206,6 +242,9 @@ def logout() -> Response:
     see: https://flask-login.readthedocs.io/en/latest/
     """
     logout_user()
+
+    # [TODO] [OPTIONAL] redirect to loginwithhn.com for logout, with a post_logout_redirect_uri
+
     return redirect("/")
 
 
